@@ -1,0 +1,1 @@
+ALTER TABLE `aiAnalysisLogs` MODIFY COLUMN `status` enum('pending','processing','completed','failed') DEFAULT 'pending';

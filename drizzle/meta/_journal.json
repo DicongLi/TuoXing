@@ -1,0 +1,62 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1765249908905,
+      "tag": "0000_steady_firebrand",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1765250172617,
+      "tag": "0001_striped_lethal_legion",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1765252378723,
+      "tag": "0002_little_lockheed",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1765443535087,
+      "tag": "0003_wealthy_slipstream",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1765761868783,
+      "tag": "0004_sour_karnak",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1765861911484,
+      "tag": "0005_messy_falcon",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1766392896053,
+      "tag": "0006_chilly_punisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1774875978750,
+      "tag": "0007_melodic_amazoness",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+ALTER TABLE `subsidiaries` MODIFY COLUMN `entityType` enum('headquarters','subsidiary','branch','affiliate','joint_venture','division') DEFAULT 'subsidiary';
