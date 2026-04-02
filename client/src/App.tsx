@@ -26,6 +26,15 @@ import MLAnalysis from "@/pages/MLAnalysis";
 // ✅ 【新增】引入您的 PushDemo 页面组件
 import PushDemo from "@/pages/PushDemo";
 
+import { useLocation } from "wouter";
+const [, setLocation] = useLocation();
+
+const token = localStorage.getItem("token");
+
+if (!token) {
+  setLocation("/auth");
+}
+
 function Router() {
   return (
     <Switch>

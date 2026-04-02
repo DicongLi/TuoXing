@@ -27,7 +27,9 @@ export default function AuthPage() {
 
     try {
       if (mode === "login") {
-        await loginMutation.mutateAsync({ email, password });
+        const result = await loginMutation.mutateAsync({ email, password });
+        // ✅ 保存 token（关键）
+        localStorage.setItem("token", result.token);
         toast.success("登录成功！");
       } else {
         await registerMutation.mutateAsync({
@@ -38,7 +40,7 @@ export default function AuthPage() {
         toast.success("注册成功！");
       }
       // 登录/注册成功后跳转首页
-      window.location.href = "/";
+      setLocation("/dashboard");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "操作失败");
     } finally {

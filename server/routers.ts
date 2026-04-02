@@ -62,7 +62,7 @@ export const appRouter = router({
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.cookie(COOKIE_NAME, token, cookieOptions);
       await db.updateUserLastSignIn(user.id);
-      return { success: true };
+      return { success: true, token};
     }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
