@@ -67,12 +67,20 @@ export default function DashboardLayout({
     localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
   }, [sidebarWidth]);
 
+  const hasToken = Boolean(localStorage.getItem("token"));
+
   if (loading) {
-    return <DashboardLayoutSkeleton />
+    return <DashboardLayoutSkeleton />;
   }
 
-  if (!user) {
+  // No token at all → show login page
+  if (!user && !hasToken) {
     return <LoginPage />;
+  }
+
+  // Token exists but user query still settling → keep skeleton, do NOT flash LoginPage
+  if (!user && hasToken) {
+    return <DashboardLayoutSkeleton />;
   }
 
   return (
