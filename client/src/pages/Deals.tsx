@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Handshake, TrendingUp, BarChart3, Loader2, Seed } from "lucide-react";
+import { Handshake, TrendingUp, BarChart3, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +37,6 @@ export default function Deals() {
   const { data: stats } = trpc.deal.stats.useQuery();
   const { data: byMonth } = trpc.deal.byMonth.useQuery({ months: 12 });
 
-  // Seed mutation
   const seedMutation = trpc.deal.seedDemoData.useMutation({
     onSuccess: () => {
       toast.success(language === "zh-CN" ? "演示数据已生成！" : "Demo data generated!");
@@ -57,9 +56,8 @@ export default function Deals() {
     }
   };
 
-  const L = (en: string, zhCN: string) => language === "en" ? en : language === "zh-CN" ? zhCN : zhCN;
+  const L = (en: string, zhCN: string) => language === "en" ? en : zhCN;
 
-  // Build product distribution from deals
   const productData = (deals || []).reduce((acc: Record<string, number>, deal) => {
     const key = deal.productType || L("General", "通用");
     acc[key] = (acc[key] || 0) + (deal.amount || 0) / 100;
@@ -70,12 +68,20 @@ export default function Deals() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 6);
 
-  // Monthly trend data from API
   const trendData = (byMonth || []).map((m: any) => ({
     month: m.month,
     amount: Math.round(m.totalAmount / 100 / 1000),
     count: m.count,
   }));
+
+  const SeedBtn = () => (
+    <Button variant="outline" onClick={handleSeedData} disabled={isSeedLoading}
+      className="border-blue-200 text-blue-600 hover:bg-blue-50">
+      {isSeedLoading
+        ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{L("Generating...", "生成中...")}</>
+        : <><BarChart3 className="h-4 w-4 mr-2" />{L("Generate Demo Data", "生成演示数据")}</>}
+    </Button>
+  );
 
   return (
     <div className="space-y-6">
@@ -84,19 +90,7 @@ export default function Deals() {
           <h1 className="text-2xl font-bold tracking-tight">{t("deals.title")}</h1>
           <p className="text-muted-foreground">{t("deals.subtitle")}</p>
         </div>
-        {(!deals || deals.length === 0) && (
-          <Button
-            variant="outline"
-            onClick={handleSeedData}
-            disabled={isSeedLoading}
-            className="border-blue-200 text-blue-600 hover:bg-blue-50"
-          >
-            {isSeedLoading
-              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{L("Generating...", "生成中...")}</>
-              : <><BarChart3 className="h-4 w-4 mr-2" />{L("Generate Demo Data", "生成演示数据")}</>
-            }
-          </Button>
-        )}
+        {(!deals || deals.length === 0) && <SeedBtn />}
       </div>
 
       {/* Stats */}
@@ -105,32 +99,25 @@ export default function Deals() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">{t("deals.total")}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats?.total || 0}</div>
-          </CardContent>
+          <CardContent><div className="text-2xl font-bold">{stats?.total || 0}</div></CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">{t("deals.totalValue")}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">{formatCurrency(stats?.totalValue || 0)}</div>
-          </CardContent>
+          <CardContent><div className="text-2xl font-bold text-green-600">{formatCurrency(stats?.totalValue || 0)}</div></CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">{t("deals.activeContracts")}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{formatCurrency(stats?.activeValue || 0)}</div>
-          </CardContent>
+          <CardContent><div className="text-2xl font-bold text-blue-600">{formatCurrency(stats?.activeValue || 0)}</div></CardContent>
         </Card>
       </div>
 
-      {/* Charts — only show when there is data */}
+      {/* Charts — only when data exists */}
       {deals && deals.length > 0 && (
         <>
-          {/* Monthly Trend */}
           {trendData.length > 0 && (
             <Card>
               <CardHeader>
@@ -146,7 +133,7 @@ export default function Deals() {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="month" />
                     <YAxis yAxisId="left" orientation="left" stroke="#3B82F6"
-                      label={{ value: L("Value (K)", "金额(千)", "金額(千)"), angle: -90, position: "insideLeft" }} />
+                      label={{ value: L("Value (K)", "金额(千)"), angle: -90, position: "insideLeft" }} />
                     <YAxis yAxisId="right" orientation="right" stroke="#10B981"
                       label={{ value: L("Count", "数量"), angle: 90, position: "insideRight" }} />
                     <Tooltip />
@@ -161,7 +148,6 @@ export default function Deals() {
             </Card>
           )}
 
-          {/* Product distribution */}
           {productChartData.length > 0 && (
             <div className="grid gap-6 md:grid-cols-2">
               <Card>
@@ -198,14 +184,9 @@ export default function Deals() {
                 <CardContent className="flex items-center justify-center">
                   <ResponsiveContainer width="100%" height={220}>
                     <PieChart>
-                      <Pie
-                        data={productChartData}
-                        cx="50%" cy="50%"
-                        outerRadius={80}
-                        dataKey="value"
+                      <Pie data={productChartData} cx="50%" cy="50%" outerRadius={80} dataKey="value"
                         label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                        labelLine={false}
-                      >
+                        labelLine={false}>
                         {productChartData.map((_, i) => (
                           <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                         ))}
@@ -261,17 +242,7 @@ export default function Deals() {
               <Handshake className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>{t("deals.noDeals")}</p>
               <p className="text-sm mt-1">{t("deals.noDealsDesc")}</p>
-              <Button
-                variant="outline"
-                className="mt-4 border-blue-200 text-blue-600 hover:bg-blue-50"
-                onClick={handleSeedData}
-                disabled={isSeedLoading}
-              >
-                {isSeedLoading
-                  ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{L("Generating...", "生成中...")}</>
-                  : <><BarChart3 className="h-4 w-4 mr-2" />{L("Generate Demo Data", "生成演示数据")}</>
-                }
-              </Button>
+              <div className="mt-4"><SeedBtn /></div>
             </div>
           )}
         </CardContent>

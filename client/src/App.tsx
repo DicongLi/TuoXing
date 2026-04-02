@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch, useLocation } from "wouter";
+import { Route, Switch, useLocation, Redirect } from "wouter";
 import { useEffect } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -24,70 +24,104 @@ import GeographicMap from "./pages/GeographicMap";
 import MLAnalysis from "@/pages/MLAnalysis";
 import PushDemo from "@/pages/PushDemo";
 
-// Auth guard: redirect to /login when not authenticated.
-// MUST live inside Router so useLocation() has a wouter context.
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+function isAuthenticated(): boolean {
+  return Boolean(localStorage.getItem("token"));
+}
+
+function isAuthPath(path: string): boolean {
+  return path === "/login" || path === "/auth" ||
+    path.startsWith("/login/") || path.startsWith("/auth/");
+}
+
+// ── Auth guard: must be INSIDE Switch to have wouter context ──────────────────
 function AuthGuard() {
   const [location, setLocation] = useLocation();
-
   useEffect(() => {
-    const isAuthPage =
-      location === "/login" ||
-      location === "/auth" ||
-      location.startsWith("/login") ||
-      location.startsWith("/auth");
-
-    // Check both cookie-based session (handled by server) and token fallback
-    const hasToken = Boolean(localStorage.getItem("token"));
-
-    // Only redirect if we're not already on an auth page.
-    // For cookie-based auth the server will reject requests anyway;
-    // we check localStorage token as a quick client-side hint.
-    if (!hasToken && !isAuthPage) {
+    if (!isAuthenticated() && !isAuthPath(location)) {
       setLocation("/login");
     }
   }, [location, setLocation]);
-
   return null;
 }
 
+// ── Layout wrapper with instant auth check ───────────────────────────────────
+function P({ children }: { children: React.ReactNode }) {
+  if (!isAuthenticated()) return <Redirect to="/login" />;
+  return <DashboardLayout>{children}</DashboardLayout>;
+}
+
+// ── Router ───────────────────────────────────────────────────────────────────
 function Router() {
   return (
     <>
       <AuthGuard />
       <Switch>
-        {/* Auth pages – no layout wrapper */}
+        {/* Auth pages — no layout */}
         <Route path="/login" component={AuthPage} />
         <Route path="/auth" component={AuthPage} />
 
-        {/* All other pages – wrapped in DashboardLayout */}
-        <Route>
-          <DashboardLayout>
-            <Switch>
-              <Route path="/" component={Dashboard} />
-              <Route path="/ml-analysis" component={MLAnalysis} />
-              <Route path="/push" component={PushDemo} />
-              <Route path="/customers" component={Customers} />
-              <Route path="/customers/:id" component={CustomerDetail} />
-              <Route path="/corporate-tree" component={CorporateTree} />
-              <Route path="/opportunities" component={Opportunities} />
-              <Route path="/deals" component={Deals} />
-              <Route path="/news" component={News} />
-              <Route path="/import" component={DataImport} />
-              <Route path="/ai-analysis" component={AIAnalysis} />
-              <Route path="/geographic" component={GeographicMap} />
-              <Route path="/pipeline" component={OpportunityPipeline} />
-              <Route path="/competitors" component={Competitors} />
-              <Route path="/404" component={NotFound} />
-              <Route component={NotFound} />
-            </Switch>
-          </DashboardLayout>
+        {/* Dashboard: both "/" and "/dashboard" work.
+            AuthPage does setLocation("/dashboard") so we must register it. */}
+        <Route path="/">
+          <P><Dashboard /></P>
         </Route>
+        <Route path="/dashboard">
+          <P><Dashboard /></P>
+        </Route>
+
+        {/* CustomerDetail uses useParams() internally — just render it, no props */}
+        <Route path="/customers/:id">
+          <P><CustomerDetail /></P>
+        </Route>
+        <Route path="/customers">
+          <P><Customers /></P>
+        </Route>
+
+        {/* All other protected pages */}
+        <Route path="/ml-analysis">
+          <P><MLAnalysis /></P>
+        </Route>
+        <Route path="/push">
+          <P><PushDemo /></P>
+        </Route>
+        <Route path="/corporate-tree">
+          <P><CorporateTree /></P>
+        </Route>
+        <Route path="/opportunities">
+          <P><Opportunities /></P>
+        </Route>
+        <Route path="/deals">
+          <P><Deals /></P>
+        </Route>
+        <Route path="/news">
+          <P><News /></P>
+        </Route>
+        <Route path="/import">
+          <P><DataImport /></P>
+        </Route>
+        <Route path="/ai-analysis">
+          <P><AIAnalysis /></P>
+        </Route>
+        <Route path="/geographic">
+          <P><GeographicMap /></P>
+        </Route>
+        <Route path="/pipeline">
+          <P><OpportunityPipeline /></P>
+        </Route>
+        <Route path="/competitors">
+          <P><Competitors /></P>
+        </Route>
+
+        {/* Fallback */}
+        <Route path="/404" component={NotFound} />
+        <Route component={NotFound} />
       </Switch>
     </>
   );
 }
 
-// App no longer calls any hooks directly – it is a pure provider wrapper.
+// App: pure provider wrapper — zero hooks here
 function App() {
   return (
     <ErrorBoundary>
