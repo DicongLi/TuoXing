@@ -337,6 +337,12 @@ async function getUserByEmail(email) {
   const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
+async function getUserById(id) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result.length > 0 ? result[0] : void 0;
+}
 async function updateUserLastSignIn(id) {
   const db = await getDb();
   if (!db) return;
@@ -893,8 +899,8 @@ var SDKServer = class {
     return new Map(Object.entries(parsed));
   }
   getSessionSecret() {
-    const secret = ENV.cookieSecret;
-    return new TextEncoder().encode(secret);
+    const secret2 = ENV.cookieSecret;
+    return new TextEncoder().encode(secret2);
   }
   /**
    * Create a session token for a Manus user openId
@@ -2564,13 +2570,44 @@ Mix of regions: Asia, Europe, Americas, Middle East if applicable.`;
   })
 });
 
+// server/auth.ts
+import { SignJWT as SignJWT2, jwtVerify as jwtVerify2 } from "jose";
+import { hash as hash2, compare as compare2 } from "bcryptjs";
+var JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+var secret = new TextEncoder().encode(JWT_SECRET);
+async function verifyToken(token) {
+  try {
+    const { payload } = await jwtVerify2(token, secret);
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 // server/_core/context.ts
 async function createContext(opts) {
   let user = null;
   try {
     user = await sdk.authenticateRequest(opts.req);
-  } catch (error) {
+  } catch {
     user = null;
+  }
+  if (!user) {
+    try {
+      const authHeader = opts.req.headers["authorization"];
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.slice(7).trim();
+        const payload = await verifyToken(token);
+        if (payload && payload.userId) {
+          const dbUser = await getUserById(payload.userId);
+          if (dbUser) {
+            user = dbUser;
+          }
+        }
+      }
+    } catch {
+      user = null;
+    }
   }
   return {
     req: opts.req,
