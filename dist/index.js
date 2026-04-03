@@ -358,22 +358,27 @@ async function getCustomers(options) {
   const db = await getDb();
   if (!db) return [];
   let query = db.select().from(customers);
+  const conditions = [];
+  if (options?.userId) conditions.push(eq(customers.createdBy, options.userId));
   if (options?.search) {
-    query = query.where(or(
+    conditions.push(or(
       like(customers.name, `%${options.search}%`),
       like(customers.registeredName, `%${options.search}%`),
       like(customers.industry, `%${options.search}%`)
     ));
   }
+  if (conditions.length > 0) query = query.where(and(...conditions));
   query = query.orderBy(desc(customers.updatedAt));
   if (options?.limit) query = query.limit(options.limit);
   if (options?.offset) query = query.offset(options.offset);
   return await query;
 }
-async function getCustomerById(id) {
+async function getCustomerById(id, userId) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.select().from(customers).where(eq(customers.id, id)).limit(1);
+  const conditions = [eq(customers.id, id)];
+  if (userId) conditions.push(eq(customers.createdBy, userId));
+  const result = await db.select().from(customers).where(and(...conditions)).limit(1);
   return result[0];
 }
 async function createCustomer(data) {
@@ -392,10 +397,12 @@ async function deleteCustomer(id) {
   if (!db) throw new Error("Database not available");
   await db.delete(customers).where(eq(customers.id, id));
 }
-async function getCustomerCount() {
+async function getCustomerCount(userId) {
   const db = await getDb();
   if (!db) return 0;
-  const result = await db.select({ count: sql`count(*)` }).from(customers);
+  let query = db.select({ count: sql`count(*)` }).from(customers);
+  if (userId) query = query.where(eq(customers.createdBy, userId));
+  const result = await query;
   return result[0]?.count ?? 0;
 }
 async function getSubsidiariesByCustomer(customerId) {
@@ -503,8 +510,9 @@ async function getAllSubsidiariesWithCustomer() {
 async function getOpportunities(options) {
   const db = await getDb();
   if (!db) return [];
-  let query = db.select().from(opportunities);
+  let query = db.select({ opportunity: opportunities }).from(opportunities).innerJoin(customers, eq(opportunities.customerId, customers.id));
   const conditions = [];
+  if (options?.userId) conditions.push(eq(customers.createdBy, options.userId));
   if (options?.customerId) conditions.push(eq(opportunities.customerId, options.customerId));
   if (options?.status) conditions.push(eq(opportunities.status, options.status));
   if (options?.stage) conditions.push(eq(opportunities.stage, options.stage));
@@ -514,7 +522,8 @@ async function getOpportunities(options) {
   query = query.orderBy(desc(opportunities.createdAt));
   if (options?.limit) query = query.limit(options.limit);
   if (options?.offset) query = query.offset(options.offset);
-  return await query;
+  const rows = await query;
+  return rows.map((r) => r.opportunity);
 }
 async function getOpportunityById(id) {
   const db = await getDb();
@@ -538,33 +547,43 @@ async function deleteOpportunity(id) {
   if (!db) throw new Error("Database not available");
   await db.delete(opportunities).where(eq(opportunities.id, id));
 }
-async function getOpportunityStats() {
+async function getOpportunityStats(userId) {
   const db = await getDb();
   if (!db) return { total: 0, active: 0, totalValue: 0 };
-  const total = await db.select({ count: sql`count(*)` }).from(opportunities);
-  const active = await db.select({ count: sql`count(*)` }).from(opportunities).where(eq(opportunities.status, "active"));
-  const value = await db.select({ sum: sql`COALESCE(SUM(amount), 0)` }).from(opportunities).where(eq(opportunities.status, "active"));
+  const userFilter = userId ? sql`INNER JOIN customers ON opportunities.customerId = customers.id AND customers.createdBy = ${userId}` : sql``;
+  const baseQ = userId ? db.select({ count: sql`count(*)` }).from(opportunities).innerJoin(customers, and(eq(opportunities.customerId, customers.id), eq(customers.createdBy, userId))) : db.select({ count: sql`count(*)` }).from(opportunities);
+  const activeQ = userId ? db.select({ count: sql`count(*)` }).from(opportunities).innerJoin(customers, and(eq(opportunities.customerId, customers.id), eq(customers.createdBy, userId))).where(eq(opportunities.status, "active")) : db.select({ count: sql`count(*)` }).from(opportunities).where(eq(opportunities.status, "active"));
+  const valueQ = userId ? db.select({ sum: sql`COALESCE(SUM(opportunities.amount), 0)` }).from(opportunities).innerJoin(customers, and(eq(opportunities.customerId, customers.id), eq(customers.createdBy, userId))).where(eq(opportunities.status, "active")) : db.select({ sum: sql`COALESCE(SUM(amount), 0)` }).from(opportunities).where(eq(opportunities.status, "active"));
+  const [total, active, value] = await Promise.all([baseQ, activeQ, valueQ]);
   return {
     total: total[0]?.count ?? 0,
     active: active[0]?.count ?? 0,
     totalValue: value[0]?.sum ?? 0
   };
 }
-async function getOpportunityByStage() {
+async function getOpportunityByStage(userId) {
   const db = await getDb();
   if (!db) return [];
-  const result = await db.select({
+  let query = db.select({
     stage: opportunities.stage,
     count: sql`count(*)`,
-    totalAmount: sql`COALESCE(SUM(amount), 0)`
-  }).from(opportunities).where(eq(opportunities.status, "active")).groupBy(opportunities.stage);
-  return result;
+    totalAmount: sql`COALESCE(SUM(opportunities.amount), 0)`
+  }).from(opportunities);
+  if (userId) {
+    query = query.innerJoin(customers, and(eq(opportunities.customerId, customers.id), eq(customers.createdBy, userId)));
+    query = query.where(eq(opportunities.status, "active"));
+  } else {
+    query = query.where(eq(opportunities.status, "active"));
+  }
+  query = query.groupBy(opportunities.stage);
+  return query;
 }
 async function getDeals(options) {
   const db = await getDb();
   if (!db) return [];
-  let query = db.select().from(deals);
+  let query = db.select({ deal: deals }).from(deals).innerJoin(customers, eq(deals.customerId, customers.id));
   const conditions = [];
+  if (options?.userId) conditions.push(eq(customers.createdBy, options.userId));
   if (options?.customerId) conditions.push(eq(deals.customerId, options.customerId));
   if (options?.status) conditions.push(eq(deals.status, options.status));
   if (conditions.length > 0) {
@@ -573,7 +592,8 @@ async function getDeals(options) {
   query = query.orderBy(desc(deals.closedDate));
   if (options?.limit) query = query.limit(options.limit);
   if (options?.offset) query = query.offset(options.offset);
-  return await query;
+  const rows = await query;
+  return rows.map((r) => r.deal);
 }
 async function getDealById(id) {
   const db = await getDb();
@@ -597,32 +617,43 @@ async function deleteDeal(id) {
   if (!db) throw new Error("Database not available");
   await db.delete(deals).where(eq(deals.id, id));
 }
-async function getDealStats() {
+async function getDealStats(userId) {
   const db = await getDb();
   if (!db) return { total: 0, totalValue: 0, activeValue: 0 };
-  const total = await db.select({ count: sql`count(*)` }).from(deals);
-  const value = await db.select({ sum: sql`COALESCE(SUM(amount), 0)` }).from(deals);
-  const activeValue = await db.select({ sum: sql`COALESCE(SUM(amount), 0)` }).from(deals).where(eq(deals.status, "active"));
+  const totalQ = userId ? db.select({ count: sql`count(*)` }).from(deals).innerJoin(customers, and(eq(deals.customerId, customers.id), eq(customers.createdBy, userId))) : db.select({ count: sql`count(*)` }).from(deals);
+  const valueQ = userId ? db.select({ sum: sql`COALESCE(SUM(deals.amount), 0)` }).from(deals).innerJoin(customers, and(eq(deals.customerId, customers.id), eq(customers.createdBy, userId))) : db.select({ sum: sql`COALESCE(SUM(amount), 0)` }).from(deals);
+  const activeQ = userId ? db.select({ sum: sql`COALESCE(SUM(deals.amount), 0)` }).from(deals).innerJoin(customers, and(eq(deals.customerId, customers.id), eq(customers.createdBy, userId))).where(eq(deals.status, "active")) : db.select({ sum: sql`COALESCE(SUM(amount), 0)` }).from(deals).where(eq(deals.status, "active"));
+  const [total, value, activeValue] = await Promise.all([totalQ, valueQ, activeQ]);
   return {
     total: total[0]?.count ?? 0,
     totalValue: value[0]?.sum ?? 0,
     activeValue: activeValue[0]?.sum ?? 0
   };
 }
-async function getDealsByMonth(months = 12) {
+async function getDealsByMonth(months = 12, userId) {
   const db = await getDb();
   if (!db) return [];
-  const result = await db.select({
-    month: sql`DATE_FORMAT(closedDate, '%Y-%m')`,
+  let query = db.select({
+    month: sql`DATE_FORMAT(deals.closedDate, '%Y-%m')`,
     count: sql`count(*)`,
-    totalAmount: sql`COALESCE(SUM(amount), 0)`
-  }).from(deals).where(gte(deals.closedDate, sql`DATE_SUB(NOW(), INTERVAL ${months} MONTH)`)).groupBy(sql`DATE_FORMAT(closedDate, '%Y-%m')`).orderBy(sql`DATE_FORMAT(closedDate, '%Y-%m')`);
-  return result;
+    totalAmount: sql`COALESCE(SUM(deals.amount), 0)`
+  }).from(deals);
+  if (userId) {
+    query = query.innerJoin(customers, and(eq(deals.customerId, customers.id), eq(customers.createdBy, userId)));
+    query = query.where(and(
+      gte(deals.closedDate, sql`DATE_SUB(NOW(), INTERVAL ${months} MONTH)`)
+    ));
+  } else {
+    query = query.where(gte(deals.closedDate, sql`DATE_SUB(NOW(), INTERVAL ${months} MONTH)`));
+  }
+  query = query.groupBy(sql`DATE_FORMAT(deals.closedDate, '%Y-%m')`);
+  query = query.orderBy(sql`DATE_FORMAT(deals.closedDate, '%Y-%m')`);
+  return query;
 }
 async function getNewsItems(options) {
   const db = await getDb();
   if (!db) return [];
-  let query = db.select().from(newsItems);
+  let query = db.select({ newsItem: newsItems }).from(newsItems).innerJoin(customers, eq(newsItems.customerId, customers.id));
   const conditions = [];
   conditions.push(
     and(
@@ -630,6 +661,7 @@ async function getNewsItems(options) {
       ne(newsItems.sourceUrl, "")
     )
   );
+  if (options?.userId) conditions.push(eq(customers.createdBy, options.userId));
   if (options?.customerId) conditions.push(eq(newsItems.customerId, options.customerId));
   if (options?.isHighlight !== void 0) conditions.push(eq(newsItems.isHighlight, options.isHighlight));
   if (conditions.length > 0) {
@@ -638,7 +670,8 @@ async function getNewsItems(options) {
   query = query.orderBy(desc(newsItems.publishedDate));
   if (options?.limit) query = query.limit(options.limit);
   if (options?.offset) query = query.offset(options.offset);
-  return await query;
+  const rows = await query;
+  return rows.map((r) => r.newsItem);
 }
 async function getNewsItemById(id) {
   const db = await getDb();
@@ -721,7 +754,7 @@ async function getAiAnalysisLogs(entityType, entityId) {
     eq(aiAnalysisLogs.entityId, entityId)
   )).orderBy(desc(aiAnalysisLogs.createdAt));
 }
-async function getDashboardStats() {
+async function getDashboardStats(userId) {
   const db = await getDb();
   if (!db) return {
     customerCount: 0,
@@ -732,17 +765,23 @@ async function getDashboardStats() {
     dealValue: 0,
     unreadNews: 0
   };
-  const [customerCount] = await db.select({ count: sql`count(*)` }).from(customers);
-  const [subsidiaryCount] = await db.select({ count: sql`count(*)` }).from(subsidiaries);
+  const [customerCount] = await db.select({ count: sql`count(*)` }).from(customers).where(userId ? eq(customers.createdBy, userId) : sql`1=1`);
+  const [subsidiaryCount] = await db.select({ count: sql`count(*)` }).from(subsidiaries).innerJoin(customers, eq(subsidiaries.customerId, customers.id)).where(userId ? eq(customers.createdBy, userId) : sql`1=1`);
   const [activeOpps] = await db.select({
     count: sql`count(*)`,
-    value: sql`COALESCE(SUM(amount), 0)`
-  }).from(opportunities).where(eq(opportunities.status, "active"));
+    value: sql`COALESCE(SUM(${opportunities.amount}), 0)`
+  }).from(opportunities).innerJoin(customers, eq(opportunities.customerId, customers.id)).where(and(
+    eq(opportunities.status, "active"),
+    userId ? eq(customers.createdBy, userId) : sql`1=1`
+  ));
   const [dealStats] = await db.select({
     count: sql`count(*)`,
-    value: sql`COALESCE(SUM(amount), 0)`
-  }).from(deals);
-  const [unreadNews] = await db.select({ count: sql`count(*)` }).from(newsItems).where(eq(newsItems.isRead, false));
+    value: sql`COALESCE(SUM(${deals.amount}), 0)`
+  }).from(deals).innerJoin(customers, eq(deals.customerId, customers.id)).where(userId ? eq(customers.createdBy, userId) : sql`1=1`);
+  const [unreadNews] = await db.select({ count: sql`count(*)` }).from(newsItems).innerJoin(customers, eq(newsItems.customerId, customers.id)).where(and(
+    eq(newsItems.isRead, false),
+    userId ? eq(customers.createdBy, userId) : sql`1=1`
+  ));
   return {
     customerCount: customerCount?.count ?? 0,
     subsidiaryCount: subsidiaryCount?.count ?? 0,
@@ -1152,28 +1191,28 @@ var t = initTRPC.context().create({
 var router = t.router;
 var publicProcedure = t.procedure;
 var requireUser = t.middleware(async (opts) => {
-  const { ctx, next } = opts;
-  if (!ctx.user) {
+  const { ctx: ctx2, next } = opts;
+  if (!ctx2.user) {
     throw new TRPCError2({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }
   return next({
     ctx: {
-      ...ctx,
-      user: ctx.user
+      ...ctx2,
+      user: ctx2.user
     }
   });
 });
 var protectedProcedure = t.procedure.use(requireUser);
 var adminProcedure = t.procedure.use(
   t.middleware(async (opts) => {
-    const { ctx, next } = opts;
-    if (!ctx.user || ctx.user.role !== "admin") {
+    const { ctx: ctx2, next } = opts;
+    if (!ctx2.user || ctx2.user.role !== "admin") {
       throw new TRPCError2({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
     return next({
       ctx: {
-        ...ctx,
-        user: ctx.user
+        ...ctx2,
+        user: ctx2.user
       }
     });
   })
@@ -1282,7 +1321,7 @@ var appRouter = router({
       email: z2.string().email("\u8BF7\u8F93\u5165\u6709\u6548\u7684\u90AE\u7BB1\u5730\u5740"),
       password: z2.string().min(6, "\u5BC6\u7801\u81F3\u5C11\u9700\u89816\u4F4D"),
       name: z2.string().optional()
-    })).mutation(async ({ input, ctx }) => {
+    })).mutation(async ({ input, ctx: ctx2 }) => {
       const existingUser = await getUserByEmail(input.email);
       if (existingUser) throw new Error("\u8BE5\u90AE\u7BB1\u5DF2\u88AB\u6CE8\u518C");
       const hashedPassword = await hash(input.password, 10);
@@ -1300,14 +1339,14 @@ var appRouter = router({
         name: input.name || input.email.split("@")[0],
         appId: "local-dev-app"
       });
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.cookie(COOKIE_NAME, token, cookieOptions);
+      const cookieOptions = getSessionCookieOptions(ctx2.req);
+      ctx2.res.cookie(COOKIE_NAME, token, cookieOptions);
       return { success: true, userId };
     }),
     login: publicProcedure.input(z2.object({
       email: z2.string().email(),
       password: z2.string()
-    })).mutation(async ({ input, ctx }) => {
+    })).mutation(async ({ input, ctx: ctx2 }) => {
       const user = await getUserByEmail(input.email);
       if (!user || !user.password) throw new Error("\u90AE\u7BB1\u6216\u5BC6\u7801\u9519\u8BEF");
       const isValid = await compare(input.password, user.password);
@@ -1317,45 +1356,45 @@ var appRouter = router({
         name: user.name || "User",
         appId: "local-dev-app"
       });
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.cookie(COOKIE_NAME, token, cookieOptions);
+      const cookieOptions = getSessionCookieOptions(ctx2.req);
+      ctx2.res.cookie(COOKIE_NAME, token, cookieOptions);
       await updateUserLastSignIn(user.id);
       return { success: true, token };
     }),
-    logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+    logout: publicProcedure.mutation(({ ctx: ctx2 }) => {
+      const cookieOptions = getSessionCookieOptions(ctx2.req);
+      ctx2.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true };
     })
   }),
   // ============ DASHBOARD ============
   dashboard: router({
     stats: publicProcedure.query(async () => {
-      return await getDashboardStats();
+      return await getDashboardStats(ctx.user?.id);
     }),
     recentDeals: publicProcedure.input(z2.object({ limit: z2.number().default(5) })).query(async ({ input }) => {
-      return await getDeals({ limit: input.limit });
+      return await getDeals({ limit: input.limit, userId: ctx.user?.id });
     }),
     recentNews: publicProcedure.input(z2.object({ limit: z2.number().default(5) })).query(async ({ input }) => {
-      return await getNewsItems({ limit: input.limit });
+      return await getNewsItems({ limit: input.limit, userId: ctx.user?.id });
     }),
     opportunityByStage: publicProcedure.query(async () => {
-      return await getOpportunityByStage();
+      return await getOpportunityByStage(ctx.user?.id);
     }),
     dealsByMonth: publicProcedure.input(z2.object({ months: z2.number().default(12) })).query(async ({ input }) => {
-      return await getDealsByMonth(input.months);
+      return await getDealsByMonth(input.months, ctx.user?.id);
     })
   }),
   // ============ CUSTOMER ============
   customer: router({
     list: publicProcedure.input(z2.object({ search: z2.string().optional(), limit: z2.number().default(50), offset: z2.number().default(0) })).query(async ({ input }) => {
-      return await getCustomers(input);
+      return await getCustomers({ ...input, userId: ctx.user?.id });
     }),
     get: publicProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
-      return await getCustomerById(input.id);
+      return await getCustomerById(input.id, ctx.user?.id);
     }),
-    create: protectedProcedure.input(z2.object({ name: z2.string().min(1), registeredName: z2.string().optional(), localName: z2.string().optional(), tradeName: z2.string().optional(), globalOneId: z2.string().optional(), industry: z2.string().optional(), industryCode: z2.string().optional(), businessType: z2.string().optional(), foundedDate: z2.string().optional(), operatingStatus: z2.string().optional(), isIndependent: z2.boolean().optional(), registrationCountry: z2.string().optional(), registrationAddress: z2.string().optional(), registrationNumber: z2.string().optional(), registrationType: z2.string().optional(), website: z2.string().optional(), phone: z2.string().optional(), email: z2.string().optional(), capitalAmount: z2.number().optional(), capitalCurrency: z2.string().optional(), annualRevenue: z2.number().optional(), revenueCurrency: z2.string().optional(), revenueYear: z2.string().optional(), employeeCount: z2.number().optional(), stockExchange: z2.string().optional(), stockSymbol: z2.string().optional(), riskLevel: z2.string().optional(), riskDescription: z2.string().optional(), ceoName: z2.string().optional(), ceoTitle: z2.string().optional(), tags: z2.string().optional(), logoUrl: z2.string().optional(), description: z2.string().optional(), notes: z2.string().optional() })).mutation(async ({ input, ctx }) => {
-      const id = await createCustomer({ ...input, createdBy: ctx.user.id });
+    create: protectedProcedure.input(z2.object({ name: z2.string().min(1), registeredName: z2.string().optional(), localName: z2.string().optional(), tradeName: z2.string().optional(), globalOneId: z2.string().optional(), industry: z2.string().optional(), industryCode: z2.string().optional(), businessType: z2.string().optional(), foundedDate: z2.string().optional(), operatingStatus: z2.string().optional(), isIndependent: z2.boolean().optional(), registrationCountry: z2.string().optional(), registrationAddress: z2.string().optional(), registrationNumber: z2.string().optional(), registrationType: z2.string().optional(), website: z2.string().optional(), phone: z2.string().optional(), email: z2.string().optional(), capitalAmount: z2.number().optional(), capitalCurrency: z2.string().optional(), annualRevenue: z2.number().optional(), revenueCurrency: z2.string().optional(), revenueYear: z2.string().optional(), employeeCount: z2.number().optional(), stockExchange: z2.string().optional(), stockSymbol: z2.string().optional(), riskLevel: z2.string().optional(), riskDescription: z2.string().optional(), ceoName: z2.string().optional(), ceoTitle: z2.string().optional(), tags: z2.string().optional(), logoUrl: z2.string().optional(), description: z2.string().optional(), notes: z2.string().optional() })).mutation(async ({ input, ctx: ctx2 }) => {
+      const id = await createCustomer({ ...input, createdBy: ctx2.user.id });
       return { id };
     }),
     update: protectedProcedure.input(z2.object({ id: z2.number(), data: z2.record(z2.any()) })).mutation(async ({ input }) => {
@@ -1397,13 +1436,13 @@ var appRouter = router({
   // ============ OPPORTUNITY ============
   opportunity: router({
     list: publicProcedure.input(z2.object({ customerId: z2.number().optional(), status: z2.string().optional(), stage: z2.string().optional(), limit: z2.number().default(50), offset: z2.number().default(0) })).query(async ({ input }) => {
-      return await getOpportunities(input);
+      return await getOpportunities({ ...input, userId: ctx.user?.id });
     }),
     get: publicProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
       return await getOpportunityById(input.id);
     }),
-    create: protectedProcedure.input(z2.object({ customerId: z2.number(), subsidiaryId: z2.number().optional(), name: z2.string().min(1), description: z2.string().optional(), stage: z2.string().optional(), status: z2.string().optional(), probability: z2.number().min(0).max(100).optional(), amount: z2.number().optional(), currency: z2.string().optional(), productType: z2.string().optional(), productCategory: z2.string().optional(), expectedCloseDate: z2.date().optional(), sourceType: z2.string().optional(), sourceDetail: z2.string().optional(), ownerName: z2.string().optional(), notes: z2.string().optional() })).mutation(async ({ input, ctx }) => {
-      const id = await createOpportunity({ ...input, ownerId: ctx.user.id });
+    create: protectedProcedure.input(z2.object({ customerId: z2.number(), subsidiaryId: z2.number().optional(), name: z2.string().min(1), description: z2.string().optional(), stage: z2.string().optional(), status: z2.string().optional(), probability: z2.number().min(0).max(100).optional(), amount: z2.number().optional(), currency: z2.string().optional(), productType: z2.string().optional(), productCategory: z2.string().optional(), expectedCloseDate: z2.date().optional(), sourceType: z2.string().optional(), sourceDetail: z2.string().optional(), ownerName: z2.string().optional(), notes: z2.string().optional() })).mutation(async ({ input, ctx: ctx2 }) => {
+      const id = await createOpportunity({ ...input, ownerId: ctx2.user.id });
       return { id };
     }),
     update: protectedProcedure.input(z2.object({ id: z2.number(), data: z2.record(z2.any()) })).mutation(async ({ input }) => {
@@ -1415,10 +1454,10 @@ var appRouter = router({
       return { success: true };
     }),
     stats: publicProcedure.query(async () => {
-      return await getOpportunityStats();
+      return await getOpportunityStats(ctx.user?.id);
     }),
     byStage: publicProcedure.query(async () => {
-      return await getOpportunityByStage();
+      return await getOpportunityByStage(ctx.user?.id);
     }),
     aiSearch: protectedProcedure.input(z2.object({
       customerId: z2.number(),
@@ -1484,13 +1523,13 @@ amount is in cents (multiply dollar value by 100). Use realistic deal sizes for 
   // ============ DEAL ============
   deal: router({
     list: publicProcedure.input(z2.object({ customerId: z2.number().optional(), status: z2.string().optional(), limit: z2.number().default(50), offset: z2.number().default(0) })).query(async ({ input }) => {
-      return await getDeals(input);
+      return await getDeals({ ...input, userId: ctx.user?.id });
     }),
     get: publicProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
       return await getDealById(input.id);
     }),
-    create: protectedProcedure.input(z2.object({ customerId: z2.number(), subsidiaryId: z2.number().optional(), opportunityId: z2.number().optional(), dealNumber: z2.string().optional(), name: z2.string().min(1), description: z2.string().optional(), amount: z2.number(), currency: z2.string().optional(), monthlyRecurring: z2.number().optional(), oneTimeFee: z2.number().optional(), productType: z2.string().optional(), productCategory: z2.string().optional(), contractStartDate: z2.date().optional(), contractEndDate: z2.date().optional(), contractDurationMonths: z2.number().optional(), status: z2.string().optional(), closedDate: z2.date().optional(), closedByName: z2.string().optional(), notes: z2.string().optional() })).mutation(async ({ input, ctx }) => {
-      const id = await createDeal({ ...input, closedBy: ctx.user.id });
+    create: protectedProcedure.input(z2.object({ customerId: z2.number(), subsidiaryId: z2.number().optional(), opportunityId: z2.number().optional(), dealNumber: z2.string().optional(), name: z2.string().min(1), description: z2.string().optional(), amount: z2.number(), currency: z2.string().optional(), monthlyRecurring: z2.number().optional(), oneTimeFee: z2.number().optional(), productType: z2.string().optional(), productCategory: z2.string().optional(), contractStartDate: z2.date().optional(), contractEndDate: z2.date().optional(), contractDurationMonths: z2.number().optional(), status: z2.string().optional(), closedDate: z2.date().optional(), closedByName: z2.string().optional(), notes: z2.string().optional() })).mutation(async ({ input, ctx: ctx2 }) => {
+      const id = await createDeal({ ...input, closedBy: ctx2.user.id });
       return { id };
     }),
     update: protectedProcedure.input(z2.object({ id: z2.number(), data: z2.record(z2.any()) })).mutation(async ({ input }) => {
@@ -1502,12 +1541,12 @@ amount is in cents (multiply dollar value by 100). Use realistic deal sizes for 
       return { success: true };
     }),
     stats: publicProcedure.query(async () => {
-      return await getDealStats();
+      return await getDealStats(ctx.user?.id);
     }),
     byMonth: publicProcedure.input(z2.object({ months: z2.number().default(12) })).query(async ({ input }) => {
-      return await getDealsByMonth(input.months);
+      return await getDealsByMonth(input.months, ctx.user?.id);
     }),
-    seedDemoData: protectedProcedure.mutation(async ({ ctx }) => {
+    seedDemoData: protectedProcedure.mutation(async ({ ctx: ctx2 }) => {
       const customerList = await getCustomers({ limit: 20 });
       if (customerList.length === 0) throw new Error("No customers found. Please create at least one customer first.");
       const productTypes = ["IDC", "IDC2.0", "Cloud Services", "IEPL", "ICTS", "IPT", "SMS", "Connectivity", "SD-WAN", "Security Services"];
@@ -1529,8 +1568,8 @@ amount is in cents (multiply dollar value by 100). Use realistic deal sizes for 
           productType,
           status,
           closedDate,
-          closedBy: ctx.user.id,
-          closedByName: ctx.user.name || "Demo User",
+          closedBy: ctx2.user.id,
+          closedByName: ctx2.user.name || "Demo User",
           currency: "USD",
           description: `Demo deal: ${productType} service agreement`
         });
@@ -1770,7 +1809,7 @@ Rules:
     getLogs: publicProcedure.input(z2.object({ entityType: z2.string(), entityId: z2.number() })).query(async ({ input }) => {
       return await getAiAnalysisLogs(input.entityType, input.entityId);
     }),
-    analyzeCustomer: protectedProcedure.input(z2.object({ language: z2.enum(["en", "zh-CN", "zh-TW"]).optional(), customerId: z2.number(), analysisType: z2.enum(["summary", "product_match", "talking_points", "risk_assessment"]) })).mutation(async ({ input, ctx }) => {
+    analyzeCustomer: protectedProcedure.input(z2.object({ language: z2.enum(["en", "zh-CN", "zh-TW"]).optional(), customerId: z2.number(), analysisType: z2.enum(["summary", "product_match", "talking_points", "risk_assessment"]) })).mutation(async ({ input, ctx: ctx2 }) => {
       try {
         const drizzle2 = await getDb();
         if (drizzle2) {
@@ -1789,7 +1828,7 @@ Rules:
         entityType: "customer",
         entityId: input.customerId,
         analysisType: input.analysisType,
-        requestedBy: ctx.user.id,
+        requestedBy: ctx2.user.id,
         status: "processing",
         prompt: "Analyzing...",
         response: "Waiting for AI...",
@@ -1830,12 +1869,12 @@ Rules:
   // ============ NEWS ============
   news: router({
     list: publicProcedure.input(z2.object({ customerId: z2.number().optional(), isHighlight: z2.boolean().optional(), limit: z2.number().default(50), offset: z2.number().default(0) })).query(async ({ input }) => {
-      return await getNewsItems(input);
+      return await getNewsItems({ ...input, userId: ctx.user?.id });
     }),
     get: publicProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
       return await getNewsItemById(input.id);
     }),
-    create: protectedProcedure.input(z2.object({ customerId: z2.number(), subsidiaryId: z2.number().optional(), title: z2.string().min(1), summary: z2.string().optional(), content: z2.string().optional(), sourceUrl: z2.string().optional(), sourceName: z2.string().optional(), publishedDate: z2.date().optional(), category: z2.string().optional(), sentiment: z2.string().optional(), relevanceScore: z2.number().min(0).max(100).optional(), isHighlight: z2.boolean().optional() })).mutation(async ({ input, ctx }) => {
+    create: protectedProcedure.input(z2.object({ customerId: z2.number(), subsidiaryId: z2.number().optional(), title: z2.string().min(1), summary: z2.string().optional(), content: z2.string().optional(), sourceUrl: z2.string().optional(), sourceName: z2.string().optional(), publishedDate: z2.date().optional(), category: z2.string().optional(), sentiment: z2.string().optional(), relevanceScore: z2.number().min(0).max(100).optional(), isHighlight: z2.boolean().optional() })).mutation(async ({ input, ctx: ctx2 }) => {
       const id = await createNewsItem(input);
       return { id };
     }),
@@ -1858,7 +1897,7 @@ Rules:
       customerId: z2.number(),
       query: z2.string().optional(),
       language: z2.enum(["en", "zh-CN", "zh-TW"]).default("en").optional()
-    })).mutation(async ({ input, ctx }) => {
+    })).mutation(async ({ input, ctx: ctx2 }) => {
       const customer = await getCustomerById(input.customerId);
       if (!customer) throw new Error("Customer not found");
       const oldNews = await getNewsItems({ customerId: input.customerId, limit: 100 });
@@ -2356,7 +2395,7 @@ Mix of regions: Asia, Europe, Americas, Middle East if applicable.`;
     uploadExcel: protectedProcedure.input(z2.object({
       fileBase64: z2.string(),
       dataType: z2.enum(["customer", "subsidiary", "opportunity", "deal", "news", "project", "recommendation"])
-    })).mutation(async ({ input, ctx }) => {
+    })).mutation(async ({ input, ctx: ctx2 }) => {
       const { fileBase64, dataType } = input;
       const drizzle2 = await getDb();
       if (!drizzle2) throw new Error("Database connection failed");
@@ -2379,7 +2418,7 @@ Mix of regions: Asia, Europe, Americas, Middle East if applicable.`;
       const importRecordId = await createDataImport({
         fileName: `Import_${dataType}_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.xlsx`,
         fileType: "excel",
-        importedBy: ctx.user.id,
+        importedBy: ctx2.user.id,
         status: "processing"
       });
       try {
@@ -2455,7 +2494,7 @@ Mix of regions: Asia, Europe, Americas, Middle East if applicable.`;
                 logoUrl: fuzzyGetValue(row, ["logoUrl"]),
                 description: fuzzyGetValue(row, ["description"]),
                 notes: fuzzyGetValue(row, ["notes"]),
-                createdBy: ctx.user.id
+                createdBy: ctx2.user.id
               });
               successCount++;
             } else if (dataType === "subsidiary") {
@@ -2507,7 +2546,7 @@ Mix of regions: Asia, Europe, Americas, Middle East if applicable.`;
                 amount: fuzzyGetValue(row, ["amount"]) ? Number(fuzzyGetValue(row, ["amount"])) * 100 : 0,
                 stage: "lead",
                 status: "active",
-                ownerId: ctx.user.id
+                ownerId: ctx2.user.id
               });
               successCount++;
             } else if (dataType === "deal") {
@@ -2522,7 +2561,7 @@ Mix of regions: Asia, Europe, Americas, Middle East if applicable.`;
                 amount: fuzzyGetValue(row, ["amount"]) ? Number(fuzzyGetValue(row, ["amount"])) * 100 : 0,
                 status: "active",
                 closedDate: /* @__PURE__ */ new Date(),
-                closedBy: ctx.user.id
+                closedBy: ctx2.user.id
               });
               successCount++;
             } else if (dataType === "news") {

@@ -47,6 +47,7 @@ export default function Opportunities() {
   );
   const { data: dbStats } = trpc.opportunity.stats.useQuery();
 
+  const utils = trpc.useUtils();
   const aiMutation = trpc.opportunity.aiSearch.useMutation();
 
   const handleSearch = async () => {
@@ -60,6 +61,9 @@ export default function Opportunities() {
       });
       setAiOpportunities((result as any).opportunities || []);
       setAiStats((result as any).stats || null);
+      // 刷新 Dashboard 数据
+      utils.dashboard.stats.invalidate();
+      utils.dashboard.opportunityByStage.invalidate();
     } catch {
       toast.error(language === "en" ? "AI search failed" : "AI搜索失败，请重试");
     } finally {

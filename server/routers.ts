@@ -73,17 +73,17 @@ export const appRouter = router({
 
   // ============ DASHBOARD ============
   dashboard: router({
-    stats: publicProcedure.query(async () => { return await db.getDashboardStats(); }),
-    recentDeals: publicProcedure.input(z.object({ limit: z.number().default(5) })).query(async ({ input }) => { return await db.getDeals({ limit: input.limit }); }),
-    recentNews: publicProcedure.input(z.object({ limit: z.number().default(5) })).query(async ({ input }) => { return await db.getNewsItems({ limit: input.limit }); }),
-    opportunityByStage: publicProcedure.query(async () => { return await db.getOpportunityByStage(); }),
-    dealsByMonth: publicProcedure.input(z.object({ months: z.number().default(12) })).query(async ({ input }) => { return await db.getDealsByMonth(input.months); }),
+    stats: publicProcedure.query(async () => { return await db.getDashboardStats(ctx.user?.id); }),
+    recentDeals: publicProcedure.input(z.object({ limit: z.number().default(5) })).query(async ({ input }) => { return await db.getDeals({ limit: input.limit, userId: ctx.user?.id }); }),
+    recentNews: publicProcedure.input(z.object({ limit: z.number().default(5) })).query(async ({ input }) => { return await db.getNewsItems({ limit: input.limit, userId: ctx.user?.id }); }),
+    opportunityByStage: publicProcedure.query(async () => { return await db.getOpportunityByStage(ctx.user?.id); }),
+    dealsByMonth: publicProcedure.input(z.object({ months: z.number().default(12) })).query(async ({ input }) => { return await db.getDealsByMonth(input.months, ctx.user?.id); }),
   }),
 
   // ============ CUSTOMER ============
   customer: router({
-    list: publicProcedure.input(z.object({ search: z.string().optional(), limit: z.number().default(50), offset: z.number().default(0), })).query(async ({ input }) => { return await db.getCustomers(input); }),
-    get: publicProcedure.input(z.object({ id: z.number() })).query(async ({ input }) => { return await db.getCustomerById(input.id); }),
+    list: publicProcedure.input(z.object({ search: z.string().optional(), limit: z.number().default(50), offset: z.number().default(0), })).query(async ({ input }) => { return await db.getCustomers({ ...input, userId: ctx.user?.id }); }),
+    get: publicProcedure.input(z.object({ id: z.number() })).query(async ({ input }) => { return await db.getCustomerById(input.id, ctx.user?.id); }),
     create: protectedProcedure.input(z.object({ name: z.string().min(1), registeredName: z.string().optional(), localName: z.string().optional(), tradeName: z.string().optional(), globalOneId: z.string().optional(), industry: z.string().optional(), industryCode: z.string().optional(), businessType: z.string().optional(), foundedDate: z.string().optional(), operatingStatus: z.string().optional(), isIndependent: z.boolean().optional(), registrationCountry: z.string().optional(), registrationAddress: z.string().optional(), registrationNumber: z.string().optional(), registrationType: z.string().optional(), website: z.string().optional(), phone: z.string().optional(), email: z.string().optional(), capitalAmount: z.number().optional(), capitalCurrency: z.string().optional(), annualRevenue: z.number().optional(), revenueCurrency: z.string().optional(), revenueYear: z.string().optional(), employeeCount: z.number().optional(), stockExchange: z.string().optional(), stockSymbol: z.string().optional(), riskLevel: z.string().optional(), riskDescription: z.string().optional(), ceoName: z.string().optional(), ceoTitle: z.string().optional(), tags: z.string().optional(), logoUrl: z.string().optional(), description: z.string().optional(), notes: z.string().optional(), })).mutation(async ({ input, ctx }) => { const id = await db.createCustomer({ ...input, createdBy: ctx.user.id }); return { id }; }),
     update: protectedProcedure.input(z.object({ id: z.number(), data: z.record(z.any()) })).mutation(async ({ input }) => { await db.updateCustomer(input.id, input.data as any); return { success: true }; }),
     delete: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => { await db.deleteCustomer(input.id); return { success: true }; }),
@@ -102,13 +102,13 @@ export const appRouter = router({
 
   // ============ OPPORTUNITY ============
   opportunity: router({
-    list: publicProcedure.input(z.object({ customerId: z.number().optional(), status: z.string().optional(), stage: z.string().optional(), limit: z.number().default(50), offset: z.number().default(0), })).query(async ({ input }) => { return await db.getOpportunities(input); }),
+    list: publicProcedure.input(z.object({ customerId: z.number().optional(), status: z.string().optional(), stage: z.string().optional(), limit: z.number().default(50), offset: z.number().default(0), })).query(async ({ input }) => { return await db.getOpportunities({ ...input, userId: ctx.user?.id }); }),
     get: publicProcedure.input(z.object({ id: z.number() })).query(async ({ input }) => { return await db.getOpportunityById(input.id); }),
     create: protectedProcedure.input(z.object({ customerId: z.number(), subsidiaryId: z.number().optional(), name: z.string().min(1), description: z.string().optional(), stage: z.string().optional(), status: z.string().optional(), probability: z.number().min(0).max(100).optional(), amount: z.number().optional(), currency: z.string().optional(), productType: z.string().optional(), productCategory: z.string().optional(), expectedCloseDate: z.date().optional(), sourceType: z.string().optional(), sourceDetail: z.string().optional(), ownerName: z.string().optional(), notes: z.string().optional(), })).mutation(async ({ input, ctx }) => { const id = await db.createOpportunity({ ...input, ownerId: ctx.user.id }); return { id }; }),
     update: protectedProcedure.input(z.object({ id: z.number(), data: z.record(z.any()) })).mutation(async ({ input }) => { await db.updateOpportunity(input.id, input.data as any); return { success: true }; }),
     delete: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => { await db.deleteOpportunity(input.id); return { success: true }; }),
-    stats: publicProcedure.query(async () => { return await db.getOpportunityStats(); }),
-    byStage: publicProcedure.query(async () => { return await db.getOpportunityByStage(); }),
+    stats: publicProcedure.query(async () => { return await db.getOpportunityStats(ctx.user?.id); }),
+    byStage: publicProcedure.query(async () => { return await db.getOpportunityByStage(ctx.user?.id); }),
     aiSearch: protectedProcedure.input(z.object({
       customerId: z.number(),
       language: z.enum(["en", "zh-CN", "zh-TW"]).default("en"),
@@ -172,13 +172,13 @@ amount is in cents (multiply dollar value by 100). Use realistic deal sizes for 
 
   // ============ DEAL ============
   deal: router({
-    list: publicProcedure.input(z.object({ customerId: z.number().optional(), status: z.string().optional(), limit: z.number().default(50), offset: z.number().default(0), })).query(async ({ input }) => { return await db.getDeals(input); }),
+    list: publicProcedure.input(z.object({ customerId: z.number().optional(), status: z.string().optional(), limit: z.number().default(50), offset: z.number().default(0), })).query(async ({ input }) => { return await db.getDeals({ ...input, userId: ctx.user?.id }); }),
     get: publicProcedure.input(z.object({ id: z.number() })).query(async ({ input }) => { return await db.getDealById(input.id); }),
     create: protectedProcedure.input(z.object({ customerId: z.number(), subsidiaryId: z.number().optional(), opportunityId: z.number().optional(), dealNumber: z.string().optional(), name: z.string().min(1), description: z.string().optional(), amount: z.number(), currency: z.string().optional(), monthlyRecurring: z.number().optional(), oneTimeFee: z.number().optional(), productType: z.string().optional(), productCategory: z.string().optional(), contractStartDate: z.date().optional(), contractEndDate: z.date().optional(), contractDurationMonths: z.number().optional(), status: z.string().optional(), closedDate: z.date().optional(), closedByName: z.string().optional(), notes: z.string().optional(), })).mutation(async ({ input, ctx }) => { const id = await db.createDeal({ ...input, closedBy: ctx.user.id }); return { id }; }),
     update: protectedProcedure.input(z.object({ id: z.number(), data: z.record(z.any()) })).mutation(async ({ input }) => { await db.updateDeal(input.id, input.data as any); return { success: true }; }),
     delete: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => { await db.deleteDeal(input.id); return { success: true }; }),
-    stats: publicProcedure.query(async () => { return await db.getDealStats(); }),
-    byMonth: publicProcedure.input(z.object({ months: z.number().default(12) })).query(async ({ input }) => { return await db.getDealsByMonth(input.months); }),
+    stats: publicProcedure.query(async () => { return await db.getDealStats(ctx.user?.id); }),
+    byMonth: publicProcedure.input(z.object({ months: z.number().default(12) })).query(async ({ input }) => { return await db.getDealsByMonth(input.months, ctx.user?.id); }),
     seedDemoData: protectedProcedure.mutation(async ({ ctx }) => {
       const customerList = await db.getCustomers({ limit: 20 });
       if (customerList.length === 0) throw new Error("No customers found. Please create at least one customer first.");
@@ -536,7 +536,7 @@ Rules:
 
   // ============ NEWS ============
   news: router({
-    list: publicProcedure.input(z.object({ customerId: z.number().optional(), isHighlight: z.boolean().optional(), limit: z.number().default(50), offset: z.number().default(0), })).query(async ({ input }) => { return await db.getNewsItems(input); }),
+    list: publicProcedure.input(z.object({ customerId: z.number().optional(), isHighlight: z.boolean().optional(), limit: z.number().default(50), offset: z.number().default(0), })).query(async ({ input }) => { return await db.getNewsItems({ ...input, userId: ctx.user?.id }); }),
     get: publicProcedure.input(z.object({ id: z.number() })).query(async ({ input }) => { return await db.getNewsItemById(input.id); }),
     create: protectedProcedure.input(z.object({ customerId: z.number(), subsidiaryId: z.number().optional(), title: z.string().min(1), summary: z.string().optional(), content: z.string().optional(), sourceUrl: z.string().optional(), sourceName: z.string().optional(), publishedDate: z.date().optional(), category: z.string().optional(), sentiment: z.string().optional(), relevanceScore: z.number().min(0).max(100).optional(), isHighlight: z.boolean().optional(), })).mutation(async ({ input, ctx }) => { const id = await db.createNewsItem(input); return { id }; }),
     update: protectedProcedure.input(z.object({ id: z.number(), data: z.record(z.any()) })).mutation(async ({ input }) => { await db.updateNewsItem(input.id, input.data as any); return { success: true }; }),

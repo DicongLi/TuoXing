@@ -118,7 +118,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {statsLoading ? (
           <><StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton /></>
         ) : (
@@ -128,12 +128,6 @@ export default function Dashboard() {
               value={stats?.customerCount || 0}
               description={`${stats?.subsidiaryCount || 0} ${t("dashboard.subsidiariesTracked")}`}
               icon={Building2} href="/customers"
-            />
-            <StatCard
-              title={t("dashboard.activeOpportunities")}
-              value={stats?.activeOpportunities || 0}
-              description={formatCurrency((stats?.opportunityValue || 0) / 100)}
-              icon={TrendingUp} href="/opportunities"
             />
             <StatCard
               title={t("dashboard.closedDeals")}

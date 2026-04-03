@@ -32,12 +32,17 @@ export function useAuth(options?: UseAuthOptions) {
         error instanceof TRPCClientError &&
         error.data?.code === "UNAUTHORIZED"
       ) {
-        return;
+        // ignore
+      } else {
+        // ignore all errors on logout
       }
-      throw error;
     } finally {
+      // ✅ Clear localStorage token so isAuthenticated() returns false
+      localStorage.removeItem("token");
       utils.auth.me.setData(undefined, null);
       await utils.auth.me.invalidate();
+      // Redirect to login page
+      window.location.href = "/login";
     }
   }, [logoutMutation, utils]);
 
@@ -67,7 +72,7 @@ export function useAuth(options?: UseAuthOptions) {
     if (typeof window === "undefined") return;
     if (window.location.pathname === redirectPath) return;
 
-    window.location.href = redirectPath
+    window.location.href = redirectPath;
   }, [
     redirectOnUnauthenticated,
     redirectPath,

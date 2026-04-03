@@ -112,27 +112,32 @@ export async function getUserByOpenId(openId: string) {
 }
 
 // ============ CUSTOMER QUERIES ============
-export async function getCustomers(options?: { search?: string; limit?: number; offset?: number }) {
+export async function getCustomers(options?: { search?: string; limit?: number; offset?: number; userId?: number }) {
   const db = await getDb();
   if (!db) return [];
   let query = db.select().from(customers);
+  const conditions = [];
+  if (options?.userId) conditions.push(eq(customers.createdBy, options.userId));
   if (options?.search) {
-    query = query.where(or(
+    conditions.push(or(
       like(customers.name, `%${options.search}%`),
       like(customers.registeredName, `%${options.search}%`),
       like(customers.industry, `%${options.search}%`)
-    )) as typeof query;
+    ));
   }
+  if (conditions.length > 0) query = query.where(and(...conditions)) as typeof query;
   query = query.orderBy(desc(customers.updatedAt)) as typeof query;
   if (options?.limit) query = query.limit(options.limit) as typeof query;
   if (options?.offset) query = query.offset(options.offset) as typeof query;
   return await query;
 }
 
-export async function getCustomerById(id: number) {
+export async function getCustomerById(id: number, userId?: number) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.select().from(customers).where(eq(customers.id, id)).limit(1);
+  const conditions = [eq(customers.id, id)];
+  if (userId) conditions.push(eq(customers.createdBy, userId));
+  const result = await db.select().from(customers).where(and(...conditions)).limit(1);
   return result[0];
 }
 
@@ -155,10 +160,12 @@ export async function deleteCustomer(id: number) {
   await db.delete(customers).where(eq(customers.id, id));
 }
 
-export async function getCustomerCount() {
+export async function getCustomerCount(userId?: number) {
   const db = await getDb();
   if (!db) return 0;
-  const result = await db.select({ count: sql<number>`count(*)` }).from(customers);
+  let query = db.select({ count: sql<number>`count(*)` }).from(customers);
+  if (userId) query = query.where(eq(customers.createdBy, userId)) as typeof query;
+  const result = await query;
   return result[0]?.count ?? 0;
 }
 
@@ -310,12 +317,15 @@ export async function getOpportunities(options?: {
   status?: string;
   stage?: string;
   limit?: number;
-  offset?: number
+  offset?: number;
+  userId?: number;
 }) {
   const db = await getDb();
   if (!db) return [];
-  let query = db.select().from(opportunities);
+  let query = db.select({ opportunity: opportunities }).from(opportunities)
+    .innerJoin(customers, eq(opportunities.customerId, customers.id));
   const conditions = [];
+  if (options?.userId) conditions.push(eq(customers.createdBy, options.userId));
   if (options?.customerId) conditions.push(eq(opportunities.customerId, options.customerId));
   if (options?.status) conditions.push(eq(opportunities.status, options.status as any));
   if (options?.stage) conditions.push(eq(opportunities.stage, options.stage as any));
@@ -325,7 +335,8 @@ export async function getOpportunities(options?: {
   query = query.orderBy(desc(opportunities.createdAt)) as typeof query;
   if (options?.limit) query = query.limit(options.limit) as typeof query;
   if (options?.offset) query = query.offset(options.offset) as typeof query;
-  return await query;
+  const rows = await query;
+  return rows.map(r => r.opportunity);
 }
 
 export async function getOpportunityById(id: number) {
@@ -354,14 +365,27 @@ export async function deleteOpportunity(id: number) {
   await db.delete(opportunities).where(eq(opportunities.id, id));
 }
 
-export async function getOpportunityStats() {
+export async function getOpportunityStats(userId?: number) {
   const db = await getDb();
   if (!db) return { total: 0, active: 0, totalValue: 0 };
-  const total = await db.select({ count: sql<number>`count(*)` }).from(opportunities);
-  const active = await db.select({ count: sql<number>`count(*)` }).from(opportunities)
-    .where(eq(opportunities.status, 'active'));
-  const value = await db.select({ sum: sql<number>`COALESCE(SUM(amount), 0)` }).from(opportunities)
-    .where(eq(opportunities.status, 'active'));
+  const userFilter = userId
+    ? sql`INNER JOIN customers ON opportunities.customerId = customers.id AND customers.createdBy = ${userId}`
+    : sql``;
+  const baseQ = userId
+    ? db.select({ count: sql<number>`count(*)` }).from(opportunities)
+        .innerJoin(customers, and(eq(opportunities.customerId, customers.id), eq(customers.createdBy, userId)))
+    : db.select({ count: sql<number>`count(*)` }).from(opportunities);
+  const activeQ = userId
+    ? db.select({ count: sql<number>`count(*)` }).from(opportunities)
+        .innerJoin(customers, and(eq(opportunities.customerId, customers.id), eq(customers.createdBy, userId)))
+        .where(eq(opportunities.status, 'active'))
+    : db.select({ count: sql<number>`count(*)` }).from(opportunities).where(eq(opportunities.status, 'active'));
+  const valueQ = userId
+    ? db.select({ sum: sql<number>`COALESCE(SUM(opportunities.amount), 0)` }).from(opportunities)
+        .innerJoin(customers, and(eq(opportunities.customerId, customers.id), eq(customers.createdBy, userId)))
+        .where(eq(opportunities.status, 'active'))
+    : db.select({ sum: sql<number>`COALESCE(SUM(amount), 0)` }).from(opportunities).where(eq(opportunities.status, 'active'));
+  const [total, active, value] = await Promise.all([baseQ, activeQ, valueQ]);
   return {
     total: total[0]?.count ?? 0,
     active: active[0]?.count ?? 0,
@@ -369,17 +393,22 @@ export async function getOpportunityStats() {
   };
 }
 
-export async function getOpportunityByStage() {
+export async function getOpportunityByStage(userId?: number) {
   const db = await getDb();
   if (!db) return [];
-  const result = await db.select({
+  let query = db.select({
     stage: opportunities.stage,
     count: sql<number>`count(*)`,
-    totalAmount: sql<number>`COALESCE(SUM(amount), 0)`
-  }).from(opportunities)
-    .where(eq(opportunities.status, 'active'))
-    .groupBy(opportunities.stage);
-  return result;
+    totalAmount: sql<number>`COALESCE(SUM(opportunities.amount), 0)`
+  }).from(opportunities) as any;
+  if (userId) {
+    query = query.innerJoin(customers, and(eq(opportunities.customerId, customers.id), eq(customers.createdBy, userId)));
+    query = query.where(eq(opportunities.status, 'active'));
+  } else {
+    query = query.where(eq(opportunities.status, 'active'));
+  }
+  query = query.groupBy(opportunities.stage);
+  return query;
 }
 
 // ============ DEAL QUERIES ============
@@ -387,12 +416,15 @@ export async function getDeals(options?: {
   customerId?: number;
   status?: string;
   limit?: number;
-  offset?: number
+  offset?: number;
+  userId?: number;
 }) {
   const db = await getDb();
   if (!db) return [];
-  let query = db.select().from(deals);
+  let query = db.select({ deal: deals }).from(deals)
+    .innerJoin(customers, eq(deals.customerId, customers.id));
   const conditions = [];
+  if (options?.userId) conditions.push(eq(customers.createdBy, options.userId));
   if (options?.customerId) conditions.push(eq(deals.customerId, options.customerId));
   if (options?.status) conditions.push(eq(deals.status, options.status as any));
   if (conditions.length > 0) {
@@ -401,7 +433,8 @@ export async function getDeals(options?: {
   query = query.orderBy(desc(deals.closedDate)) as typeof query;
   if (options?.limit) query = query.limit(options.limit) as typeof query;
   if (options?.offset) query = query.offset(options.offset) as typeof query;
-  return await query;
+  const rows = await query;
+  return rows.map(r => r.deal);
 }
 
 export async function getDealById(id: number) {
@@ -430,13 +463,23 @@ export async function deleteDeal(id: number) {
   await db.delete(deals).where(eq(deals.id, id));
 }
 
-export async function getDealStats() {
+export async function getDealStats(userId?: number) {
   const db = await getDb();
   if (!db) return { total: 0, totalValue: 0, activeValue: 0 };
-  const total = await db.select({ count: sql<number>`count(*)` }).from(deals);
-  const value = await db.select({ sum: sql<number>`COALESCE(SUM(amount), 0)` }).from(deals);
-  const activeValue = await db.select({ sum: sql<number>`COALESCE(SUM(amount), 0)` }).from(deals)
-    .where(eq(deals.status, 'active'));
+  const totalQ = userId
+    ? db.select({ count: sql<number>`count(*)` }).from(deals)
+        .innerJoin(customers, and(eq(deals.customerId, customers.id), eq(customers.createdBy, userId)))
+    : db.select({ count: sql<number>`count(*)` }).from(deals);
+  const valueQ = userId
+    ? db.select({ sum: sql<number>`COALESCE(SUM(deals.amount), 0)` }).from(deals)
+        .innerJoin(customers, and(eq(deals.customerId, customers.id), eq(customers.createdBy, userId)))
+    : db.select({ sum: sql<number>`COALESCE(SUM(amount), 0)` }).from(deals);
+  const activeQ = userId
+    ? db.select({ sum: sql<number>`COALESCE(SUM(deals.amount), 0)` }).from(deals)
+        .innerJoin(customers, and(eq(deals.customerId, customers.id), eq(customers.createdBy, userId)))
+        .where(eq(deals.status, 'active'))
+    : db.select({ sum: sql<number>`COALESCE(SUM(amount), 0)` }).from(deals).where(eq(deals.status, 'active'));
+  const [total, value, activeValue] = await Promise.all([totalQ, valueQ, activeQ]);
   return {
     total: total[0]?.count ?? 0,
     totalValue: value[0]?.sum ?? 0,
@@ -444,18 +487,25 @@ export async function getDealStats() {
   };
 }
 
-export async function getDealsByMonth(months: number = 12) {
+export async function getDealsByMonth(months: number = 12, userId?: number) {
   const db = await getDb();
   if (!db) return [];
-  const result = await db.select({
-    month: sql<string>`DATE_FORMAT(closedDate, '%Y-%m')`,
+  let query = db.select({
+    month: sql<string>`DATE_FORMAT(deals.closedDate, '%Y-%m')`,
     count: sql<number>`count(*)`,
-    totalAmount: sql<number>`COALESCE(SUM(amount), 0)`
-  }).from(deals)
-    .where(gte(deals.closedDate, sql`DATE_SUB(NOW(), INTERVAL ${months} MONTH)`))
-    .groupBy(sql`DATE_FORMAT(closedDate, '%Y-%m')`)
-    .orderBy(sql`DATE_FORMAT(closedDate, '%Y-%m')`);
-  return result;
+    totalAmount: sql<number>`COALESCE(SUM(deals.amount), 0)`
+  }).from(deals) as any;
+  if (userId) {
+    query = query.innerJoin(customers, and(eq(deals.customerId, customers.id), eq(customers.createdBy, userId)));
+    query = query.where(and(
+      gte(deals.closedDate, sql`DATE_SUB(NOW(), INTERVAL ${months} MONTH)`),
+    ));
+  } else {
+    query = query.where(gte(deals.closedDate, sql`DATE_SUB(NOW(), INTERVAL ${months} MONTH)`));
+  }
+  query = query.groupBy(sql`DATE_FORMAT(deals.closedDate, '%Y-%m')`);
+  query = query.orderBy(sql`DATE_FORMAT(deals.closedDate, '%Y-%m')`);
+  return query;
 }
 
 // ============ NEWS QUERIES ============
@@ -463,11 +513,13 @@ export async function getNewsItems(options?: {
   customerId?: number;
   isHighlight?: boolean;
   limit?: number;
-  offset?: number
+  offset?: number;
+  userId?: number;
 }) {
   const db = await getDb();
   if (!db) return [];
-  let query = db.select().from(newsItems);
+  let query = db.select({ newsItem: newsItems }).from(newsItems)
+    .innerJoin(customers, eq(newsItems.customerId, customers.id));
   const conditions = [];
 
   conditions.push(
@@ -477,6 +529,7 @@ export async function getNewsItems(options?: {
     )
   );
 
+  if (options?.userId) conditions.push(eq(customers.createdBy, options.userId));
   if (options?.customerId) conditions.push(eq(newsItems.customerId, options.customerId));
   if (options?.isHighlight !== undefined) conditions.push(eq(newsItems.isHighlight, options.isHighlight));
 
@@ -487,7 +540,8 @@ export async function getNewsItems(options?: {
   query = query.orderBy(desc(newsItems.publishedDate)) as typeof query;
   if (options?.limit) query = query.limit(options.limit) as typeof query;
   if (options?.offset) query = query.offset(options.offset) as typeof query;
-  return await query;
+  const rows = await query;
+  return rows.map(r => r.newsItem);
 }
 
 export async function getNewsItemById(id: number) {
@@ -598,7 +652,7 @@ export async function getAiAnalysisLogs(entityType: string, entityId: number) {
 }
 
 // ============ DASHBOARD STATS ============
-export async function getDashboardStats() {
+export async function getDashboardStats(userId?: number) {
   const db = await getDb();
   if (!db) return {
     customerCount: 0,
@@ -610,18 +664,32 @@ export async function getDashboardStats() {
     unreadNews: 0
   };
 
-  const [customerCount] = await db.select({ count: sql<number>`count(*)` }).from(customers);
-  const [subsidiaryCount] = await db.select({ count: sql<number>`count(*)` }).from(subsidiaries);
+  const [customerCount] = await db.select({ count: sql<number>`count(*)` }).from(customers)
+    .where(userId ? eq(customers.createdBy, userId) : sql`1=1`);
+  const [subsidiaryCount] = await db.select({ count: sql<number>`count(*)` }).from(subsidiaries)
+    .innerJoin(customers, eq(subsidiaries.customerId, customers.id))
+    .where(userId ? eq(customers.createdBy, userId) : sql`1=1`);
   const [activeOpps] = await db.select({
     count: sql<number>`count(*)`,
-    value: sql<number>`COALESCE(SUM(amount), 0)`
-  }).from(opportunities).where(eq(opportunities.status, 'active'));
+    value: sql<number>`COALESCE(SUM(${opportunities.amount}), 0)`
+  }).from(opportunities)
+    .innerJoin(customers, eq(opportunities.customerId, customers.id))
+    .where(and(
+      eq(opportunities.status, 'active'),
+      userId ? eq(customers.createdBy, userId) : sql`1=1`
+    ));
   const [dealStats] = await db.select({
     count: sql<number>`count(*)`,
-    value: sql<number>`COALESCE(SUM(amount), 0)`
-  }).from(deals);
+    value: sql<number>`COALESCE(SUM(${deals.amount}), 0)`
+  }).from(deals)
+    .innerJoin(customers, eq(deals.customerId, customers.id))
+    .where(userId ? eq(customers.createdBy, userId) : sql`1=1`);
   const [unreadNews] = await db.select({ count: sql<number>`count(*)` }).from(newsItems)
-    .where(eq(newsItems.isRead, false));
+    .innerJoin(customers, eq(newsItems.customerId, customers.id))
+    .where(and(
+      eq(newsItems.isRead, false),
+      userId ? eq(customers.createdBy, userId) : sql`1=1`
+    ));
 
   return {
     customerCount: customerCount?.count ?? 0,
